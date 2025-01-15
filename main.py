@@ -1,35 +1,25 @@
-import asyncio
-from splitio import get_factory_async
-from splitio.exceptions import TimeoutException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from split_client import SplitClientSingleton
 
-from dotenv import load_dotenv
-import os
+split_client = SplitClientSingleton()
 
-load_dotenv()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize resources (startup)
+    print("Starting up: Initializing Split client...")
+    await split_client.initialize()
+    print("Split client initialized.")
+    yield
+    # Cleanup resources (shutdown)
+    print("Shutting down: Cleaning up Split client...")
+    await split_client.shutdown()
+    print("Split client shut down.")
 
-split_api_key = os.getenv('SPLIT_API_KEY')
-firm_id = '123'
+# Pass the lifespan context manager to FastAPI
+app = FastAPI(lifespan=lifespan)
 
-async def main():
-    factory = await get_factory_async(split_api_key)
-    try:
-        await factory.block_until_ready(5) # wait up to 5 seconds
-    except TimeoutException:
-        # Now the user can choose whether to abort the whole execution, or just keep going
-        # without a ready client, which if configured properly, should become ready at some point.
-        pass
-    split = factory.client()
-
-    treatment = await split.get_treatment(firm_id, 'ENABLE_MEETING_TYPE')
-    
-    if treatment == 'on':
-        print('Meeting type is enabled')
-    elif treatment == 'off':
-        print('Meeting type is disabled')
-    else:
-        print("Error in split")
-
-
-
-# Use asyncio.run to handle the event loop
-asyncio.run(main())
+@app.get("/get-treatment/{firm_id}/{feature_name}")
+async def get_treatment(firm_id: str, feature_name: str):
+    treatment = await split_client.get_treatment(firm_id, feature_name)
+    return {"treatment": treatment}
